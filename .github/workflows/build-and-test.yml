@@ -106,6 +106,39 @@ jobs:
           path: build/compile_commands.json
           retention-days: 1
 
+      # Package the freshly built tools into a small CI-only image for
+      # downstream consumers (e.g. OCaMI's end-to-end tests). Only the static
+      # binaries and the node executor are shipped; pushed on main, not PRs.
+      - name: Stage toolchain image context
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p ctx/build/bin ctx/toolchain
+          cp build/bin/wasm-opt build/bin/wasm-emit ctx/build/bin/
+          strip ctx/build/bin/wasm-opt ctx/build/bin/wasm-emit
+          cp -r toolchain/node-executor ctx/toolchain/node-executor
+
+      # Pushes to the personal ghcr.io/byeongjee namespace, so it authenticates
+      # with a PAT (write:packages) stored as the GHCR_PAT secret rather than the
+      # repo's GITHUB_TOKEN, which only covers org-owned packages.
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: byeongjee
+          password: ${{ secrets.GHCR_PAT }}
+
+      - name: Build and push toolchain image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: ctx
+          file: docker/wami-toolchain.Dockerfile
+          push: true
+          tags: |
+            ghcr.io/byeongjee/wami-toolchain:${{ github.sha }}
+            ghcr.io/byeongjee/wami-toolchain:latest
+
   clang-tidy:
     name: clang-tidy (advisory)
     needs: build-and-test
